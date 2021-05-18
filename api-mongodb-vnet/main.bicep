@@ -1,5 +1,8 @@
 param location string = 'UK West'
 param virtualNetworkName string = 'Vnet'
+param virtualAddressRange string = '172.20.0.0/16'
+param dataSubnetAddressRange string = '172.20.0.0/24'
+param functionSubnetAddressRange string = '172.20.1.0/24'
 param accountName string = 'mongotest53456456'
 param dataSubnet string = 'dataSubnet'
 param functionSubnet string = 'functionSubnet'
@@ -7,16 +10,10 @@ param consistencyLevel string = 'Session'
 param serverVersion string = '4.0'
 param storageAccountName string = 'functionstorage12245'
 param apiName string = 'dataLandscapeApi'
-
-@allowed([
-  'Enabled'
-  'Disabled'
-])
-param publicNetworkAccess string = 'Enabled'
-
 param privateEndpointName string = 'cosmosDbPe'
+param privateDnsZoneName string = 'privatelink.mongo.cosmos.azure.com'
 
-//Networking
+//Virtual Network
 
 resource virtualNetwork 'Microsoft.Network/virtualNetworks@2020-07-01' = {
   name: virtualNetworkName
@@ -24,38 +21,44 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2020-07-01' = {
   properties: {
     addressSpace: {
       addressPrefixes: [
-        '172.20.0.0/16'
+        virtualAddressRange
       ]
     }
-    subnets: [
+  }
+}
+
+resource data_Subnet 'Microsoft.Network/virtualNetworks/subnets@2020-07-01' = {
+  parent: virtualNetwork
+  name: dataSubnet
+  properties: {
+    addressPrefix: dataSubnetAddressRange
+    privateEndpointNetworkPolicies: 'Disabled'
+  }
+}
+
+resource function_Subnet 'Microsoft.Network/virtualNetworks/subnets@2020-07-01' = {
+  parent: virtualNetwork
+  name: functionSubnet
+  properties: {
+    addressPrefix: functionSubnetAddressRange
+    privateEndpointNetworkPolicies: 'Disabled'
+    serviceEndpoints: [
       {
-        name: dataSubnet
-        properties: {
-          addressPrefix: '172.20.0.0/24'
-          privateEndpointNetworkPolicies: 'Disabled'
-        }
+        service: 'Microsoft.AzureCosmosDB'
       }
+    ]
+    delegations: [
       {
-        name: functionSubnet
+        name: 'delegation'
         properties: {
-          addressPrefix: '172.20.1.0/24'
-          privateEndpointNetworkPolicies: 'Disabled'
-          delegations: [
-            {
-              name: 'delegation'
-              properties: {
-                serviceName: 'Microsoft.Web/serverFarms'
-              }
-            }
-          ]
+          serviceName: 'Microsoft.Web/serverFarms'
         }
       }
     ]
   }
 }
 
-
-//Data
+//CosmosDB - MongoDB
 
 resource mongoDB_Account 'Microsoft.DocumentDB/databaseAccounts@2021-01-15' = {
   name: accountName
@@ -75,8 +78,31 @@ resource mongoDB_Account 'Microsoft.DocumentDB/databaseAccounts@2021-01-15' = {
     databaseAccountOfferType: 'Standard'
     enableAutomaticFailover: false
     enableMultipleWriteLocations: false
-    publicNetworkAccess: publicNetworkAccess
+    publicNetworkAccess: 'Enabled'
     networkAclBypass: 'AzureServices'
+    isVirtualNetworkFilterEnabled: true
+    virtualNetworkRules: [
+      {
+        id: function_Subnet.id
+      }
+    ]
+    ipRules: [
+      {
+        ipAddressOrRange: '104.42.195.92' // Allow Azure portal access
+      }
+      {
+        ipAddressOrRange: '40.76.54.131' // Allow Azure portal access
+      }
+      {
+        ipAddressOrRange: '52.176.6.30' // Allow Azure portal access
+      }
+      {
+        ipAddressOrRange: '52.169.50.45' // Allow Azure portal access
+      } 
+      {
+        ipAddressOrRange: '52.187.184.26' // Allow Azure portal access
+      }
+    ]
     apiProperties: {
       serverVersion: serverVersion
     }
@@ -88,7 +114,7 @@ resource privateEndpoint 'Microsoft.Network/privateEndpoints@2020-06-01' = {
   location: location
   properties: {
     subnet: {
-      id: resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetwork.name, dataSubnet)
+      id: data_Subnet.id
     }
     privateLinkServiceConnections: [
       {
@@ -104,7 +130,42 @@ resource privateEndpoint 'Microsoft.Network/privateEndpoints@2020-06-01' = {
   }
 }
 
-//Function App
+resource privateDNSZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: privateDnsZoneName
+  tags: {}
+  location: 'global'
+  properties: {}
+}
+
+resource privateDNSZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: privateDNSZone
+  name: concat(privateDnsZoneName, '-link')
+  tags: {}
+  location: 'global'
+  properties: {
+    virtualNetwork: {
+      id: virtualNetwork.id
+    }
+    registrationEnabled: false
+  }
+}
+
+resource privateDNSZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2020-07-01' = {
+  parent: privateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'privatelink_mongo_cosmos_azure_com'
+        properties: {
+          privateDnsZoneId: privateDNSZone.id
+        }
+      }
+    ]
+  }
+}
+
+//Function App - Premium with VNet Integration
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2021-02-01' = {
   name: storageAccountName
@@ -177,7 +238,7 @@ resource function 'Microsoft.Web/sites@2020-12-01' = {
 resource networkConfig 'Microsoft.Web/sites/networkConfig@2020-06-01' = {
   name: '${function.name}/virtualNetwork'
   properties: {
-    subnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetwork.name, functionSubnet)
+    subnetResourceId: function_Subnet.id
     swiftSupported: true
   }
 }
