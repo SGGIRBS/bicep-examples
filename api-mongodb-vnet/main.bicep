@@ -5,6 +5,7 @@ param dataSubnetAddressRange string = '172.20.0.0/24'
 param functionSubnetAddressRange string = '172.20.1.0/24'
 param accountName string = 'mongotest53456456'
 param dataSubnet string = 'dataSubnet'
+param autoscaleMaxThroughput int = 4000
 param functionSubnet string = 'functionSubnet'
 param consistencyLevel string = 'Session'
 param serverVersion string = '4.0'
@@ -24,9 +25,43 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2020-07-01' = {
         virtualAddressRange
       ]
     }
+    subnets: [
+      {
+        name: dataSubnet
+        properties: {
+          addressPrefix: dataSubnetAddressRange
+          privateEndpointNetworkPolicies: 'Disabled'
+        }
+      }
+      {
+        name: functionSubnet
+        properties: {
+          addressPrefix: functionSubnetAddressRange
+          privateEndpointNetworkPolicies: 'Disabled'
+          privateLinkServiceNetworkPolicies: 'Enabled'
+          serviceEndpoints: [
+            {
+              service: 'Microsoft.AzureCosmosDB'
+              locations: [
+                '*'
+              ]
+            }
+          ]
+          delegations: [
+            {
+              name: 'delegation'
+              properties: {
+                serviceName: 'Microsoft.Web/serverFarms'
+              }
+            }
+          ]
+        }
+      }
+    ]
   }
 }
 
+// Define subnets twice to reference by resource identifier?
 resource data_Subnet 'Microsoft.Network/virtualNetworks/subnets@2020-07-01' = {
   parent: virtualNetwork
   name: dataSubnet
@@ -42,6 +77,7 @@ resource function_Subnet 'Microsoft.Network/virtualNetworks/subnets@2020-07-01' 
   properties: {
     addressPrefix: functionSubnetAddressRange
     privateEndpointNetworkPolicies: 'Disabled'
+    privateLinkServiceNetworkPolicies: 'Enabled'
     serviceEndpoints: [
       {
         service: 'Microsoft.AzureCosmosDB'
@@ -110,6 +146,9 @@ resource mongoDB_Account 'Microsoft.DocumentDB/databaseAccounts@2021-01-15' = {
 }
 
 resource privateEndpoint 'Microsoft.Network/privateEndpoints@2020-06-01' = {
+  dependsOn: [
+    func_networkConfig
+  ]
   name: privateEndpointName
   location: location
   properties: {
@@ -235,10 +274,11 @@ resource function 'Microsoft.Web/sites@2020-12-01' = {
   }
 }
 
-resource networkConfig 'Microsoft.Web/sites/networkConfig@2020-06-01' = {
+resource func_networkConfig 'Microsoft.Web/sites/networkConfig@2020-06-01' = {
   name: '${function.name}/virtualNetwork'
   properties: {
     subnetResourceId: function_Subnet.id
     swiftSupported: true
   }
 }
+
