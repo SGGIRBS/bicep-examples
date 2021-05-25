@@ -1,4 +1,6 @@
 param location string = 'UK West'
+param keyVaultName string = 'KV-ODSPOC-DEV-MGMT-999'
+param logAnalyticsName string = 'LAWSP-ODS-POC'
 param virtualNetworkName string = 'Vnet'
 param virtualAddressRange string = '172.20.0.0/16'
 param dataSubnetAddressRange string = '172.20.0.0/24'
@@ -13,6 +15,68 @@ param storageAccountName string = 'functionstorage12245'
 param apiName string = 'dataLandscapeApi'
 param privateEndpointName string = 'cosmosDbPe'
 param privateDnsZoneName string = 'privatelink.mongo.cosmos.azure.com'
+param developerPublicIP string = ''
+param developerObjectId string = ''
+
+
+//Management
+resource key_vault 'Microsoft.KeyVault/vaults@2019-09-01' = {
+  name: keyVaultName
+  location: location
+  tags: {}
+  properties: {
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    accessPolicies: [
+      {
+        tenantId: subscription().tenantId
+        objectId: function.identity.principalId
+        permissions: {
+          secrets: [
+            'get'
+          ]
+        }
+      }
+      {
+        tenantId: subscription().tenantId
+        objectId: developerObjectId
+        permissions: {
+          secrets: [
+            'all'
+          ]
+        } 
+      }
+    ]
+    enabledForDeployment: true
+    enabledForDiskEncryption: false
+    enabledForTemplateDeployment: true
+    enableSoftDelete: false
+    //softDeleteRetentionInDays: int
+    enableRbacAuthorization: false
+    enablePurgeProtection: true
+  }
+}
+
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2020-03-01-preview' = {
+  name: logAnalyticsName
+  tags: {}
+  location: location
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+    workspaceCapping: {
+      dailyQuotaGb: any('-1')
+    }
+    publicNetworkAccessForIngestion: 'Enabled'
+    publicNetworkAccessForQuery: 'Enabled'
+  }
+}
+
 
 //Virtual Network
 
@@ -124,6 +188,9 @@ resource mongoDB_Account 'Microsoft.DocumentDB/databaseAccounts@2021-01-15' = {
     ]
     ipRules: [
       {
+        ipAddressOrRange: '90.243.174.81' //Allow developer public access
+      }
+      {
         ipAddressOrRange: '104.42.195.92' // Allow Azure portal access
       }
       {
@@ -145,6 +212,35 @@ resource mongoDB_Account 'Microsoft.DocumentDB/databaseAccounts@2021-01-15' = {
   }
 }
 
+resource cosmosDiag 'Microsoft.DocumentDb/databaseAccounts/providers/diagnosticSettings@2017-05-01-preview' = {
+  name: concat(mongoDB_Account.name, '/Microsoft.Insights/', logAnalyticsName)
+  dependsOn: [
+    mongoDB_Account
+  ]
+  location: location
+  properties: {
+    name: logAnalyticsName
+    logs: [
+      {
+        category: 'MongoRequests'
+        enabled: true
+      }
+    ]
+    workspaceId: logAnalytics.id
+  }
+}
+
+// Add Cosmos primary connection string to key vault
+resource symbolicname 'Microsoft.KeyVault/vaults/secrets@2019-09-01' = {
+  parent: key_vault
+  name: '${mongoDB_Account.name}-PrimaryConnectionString'
+  tags: {}
+  properties: {
+    value: listConnectionStrings(resourceId('Microsoft.DocumentDB/databaseAccounts', mongoDB_Account.name), '2020-04-01').connectionStrings[0].connectionString
+  }
+}
+
+// Create Cosmos private endpoint and DNS zone
 resource privateEndpoint 'Microsoft.Network/privateEndpoints@2020-06-01' = {
   dependsOn: [
     func_networkConfig
@@ -204,7 +300,7 @@ resource privateDNSZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneG
   }
 }
 
-//Function App - Premium with VNet Integration
+//Create Function App - Premium with VNet Integration
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2021-02-01' = {
   name: storageAccountName
@@ -240,7 +336,10 @@ resource serverFarm 'Microsoft.Web/serverfarms@2020-12-01' = {
 resource function 'Microsoft.Web/sites@2020-12-01' = {
   name: apiName
   location: location
-  kind: 'functionapp'
+  kind: 'functionapp' //'functionapp,linux'
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     serverFarmId: serverFarm.id
     siteConfig: {
@@ -281,4 +380,3 @@ resource func_networkConfig 'Microsoft.Web/sites/networkConfig@2020-06-01' = {
     swiftSupported: true
   }
 }
-
