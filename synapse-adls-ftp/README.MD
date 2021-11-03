@@ -14,7 +14,6 @@ Creates:
 - Azure Container Instance FTP solution using Azure Files for persistent storage
 - Log Analytics Workspace with synapse diagnostic logs configured
 
-
-
+Supporting CLI scripts provided for assigning Synapse RBAC and creating Data Lake directories. 
 
 
