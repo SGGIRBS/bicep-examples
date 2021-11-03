@@ -1,4 +1,4 @@
-A Bicep template covering the infrastructure components of a modern data warehouse deployment using Azure Synapse. Also includes an FTP server running on Azure Container Instance.
+A Bicep template covering the infrastructure components of a modern data warehouse deployment using Azure Synapse. Also includes an FTP server running on Azure Container Instance for data ingestion.
 
 Dependencies:
 - Azure AD Group object id for Data Engineers
