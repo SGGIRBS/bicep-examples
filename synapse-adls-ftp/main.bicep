@@ -4,6 +4,7 @@ param synapseWorkspaceName string
 param synapseManagedRGName string
 param dataLakeStorageAccountName string
 param keyVaultName string
+param logAnalyticsName string
 
 // Secure admin details
 @secure()
@@ -77,6 +78,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2019-09-01' = {
 }
 
 // Add secrets
+
 resource sqlAdministratorLoginSecret 'Microsoft.KeyVault/vaults/secrets@2019-09-01' = {
   name: '${keyVault.name}/sql-admin-username'
   properties: {
@@ -117,6 +119,7 @@ resource sftpUserPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2019-09-01' =
   }
 }
 // Data lake storage
+
 resource dataLakeStorage 'Microsoft.Storage/storageAccounts@2021-02-01' = {
   name: dataLakeStorageAccountName
   location: location
@@ -144,8 +147,8 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2021-02-01'
   }
 }
 
-
 // Data lake storage filesystem
+
 resource dataLakeStorageFilesystem1 'Microsoft.Storage/storageAccounts/blobServices/containers@2018-02-01' = {
   name: '${dataLakeStorage.name}/default/raw'
   properties: {
@@ -194,6 +197,7 @@ resource synapseBlobDataContributorRole 'Microsoft.Authorization/roleAssignments
 }
 
 // Assign blob contributor RBAC for the data engineers group
+
 resource defs1BlobDataContributorRole 'Microsoft.Authorization/roleAssignments@2018-09-01-preview' = {
   name: '29e61a3a-2a44-4cef-a33d-7c47dc392429'
   scope: dataLakeStorageFilesystem1
@@ -268,6 +272,7 @@ resource dafs4BlobDataReaderRole 'Microsoft.Authorization/roleAssignments@2018-0
 
 
 // Synapse Workspace
+
 resource synapseWorkspace 'Microsoft.Synapse/workspaces@2021-03-01' = {
   name: synapseWorkspaceName
   location: location
@@ -300,6 +305,54 @@ resource synapseAllowAzure 'Microsoft.Synapse/workspaces/firewallrules@2019-06-0
   properties: {
     endIpAddress: '0.0.0.0'
     startIpAddress: '0.0.0.0'
+  }
+}
+
+// Log Analytics for Synapse
+
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2020-03-01-preview' = {
+  name: logAnalyticsName
+  tags: {}
+  location: location
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+    workspaceCapping: {
+      dailyQuotaGb: any('-1')
+    }
+    publicNetworkAccessForIngestion: 'Enabled'
+    publicNetworkAccessForQuery: 'Enabled'
+  }
+}
+
+resource synapseDiag 'Microsoft.Insights/diagnosticsettings@2021-05-01-preview' = {
+  scope: synapseWorkspace
+  name: 'diag-${synapseWorkspace.name}'
+  dependsOn: [
+    synapseWorkspace
+  ]
+  properties: {
+    logs: [
+      {
+        category: 'SynapseRbacOperations'
+        enabled: true
+      }
+      {
+        category: 'IntegrationPipelineRuns'
+        enabled: true
+      }
+      {
+        category: 'IntegrationActivityRuns'
+        enabled: true
+      }
+      {
+        category: 'IntegrationTriggerRuns'
+        enabled: true
+      }
+    ]
+    workspaceId: logAnalytics.id
   }
 }
 
