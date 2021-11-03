@@ -8,10 +8,11 @@ Dependencies:
 <br>
 
 Creates:
-- Azure Key Vault with access policies set for AD Groups and Synapse managed identity. Solution secrets are automatically added.
-- Azure Data Lake Storage Gen 2 with standard data lake filesystem structure and RBAC assignments
+- Azure Key Vault with access policies set for AD Groups and Synapse managed identity. Solution secrets are automatically added
+- Azure Data Lake Storage Gen 2 with a standard data lake filesystem structure and RBAC assignments
 - Azure Synapse Workspace
 - Azure Container Instance FTP solution using Azure Files for persistent storage
+- Log Analytics Workspace with synapse diagnostic logs configured
 
 
 
